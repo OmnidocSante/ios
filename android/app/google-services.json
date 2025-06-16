@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1017446732688",
+    "project_id": "regulation-459709",
+    "storage_bucket": "regulation-459709.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1017446732688:android:91e99d21e8250e26875915",
+        "android_client_info": {
+          "package_name": "com.example.transport_sante"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDIKdpuXfgqrave5sodRYhtC_dISZCt1tg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

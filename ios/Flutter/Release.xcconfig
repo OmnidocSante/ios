@@ -1,0 +1,6 @@
+#include? "Pods/Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"
+#include "Generated.xcconfig"
+FRAMEWORK_SEARCH_PATHS = $(inherited) "${PODS_ROOT}/Flutter"
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks
+SWIFT_VERSION = 5.0
+ENABLE_BITCODE = NO
