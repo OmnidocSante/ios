@@ -69,12 +69,12 @@ jobs:
           echo "Listing build directory contents:"
           ls -la build/ios/ipa/
           
-      - name: Upload to App Store
-        uses: apple-actions/upload-testflight@v1
+      - name: Upload to TestFlight
+        uses: apple-actions/app-store-connect-api@v1
         with:
           app-path: build/ios/ipa/*.ipa
-          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
           api-key-id: ${{ secrets.APPSTORE_KEY_ID }}
           api-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          api-key-issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
           skip-waiting-for-processing: true
           verbose-logging: true 
