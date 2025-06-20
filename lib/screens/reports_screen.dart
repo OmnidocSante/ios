@@ -172,7 +172,7 @@ class _ReportsScreenState extends State<ReportsScreen>
           mission['materiels_utilises'] = materials;
 
           try {
-            await _generateAndSaveReport(mission);
+          await _generateAndSaveReport(mission);
           } catch (e) {
             // Gérer l'erreur silencieusement
           }

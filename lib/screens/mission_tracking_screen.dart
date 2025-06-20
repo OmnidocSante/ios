@@ -16,6 +16,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
+import '../services/methods/mission_tracking_methods.dart';
+import 'dart:async';
 
 class MissionTrackingScreen extends StatefulWidget {
   final int missionId;
@@ -116,6 +118,48 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  Future<void> _loadMissionDataFromApi() async {
+    try {
+      final missionData = await MissionApi.getMissionDetails(widget.missionId);
+      if (missionData == null || !mounted) return;
+
+      setState(() {
+        _missionData = missionData;
+        _currentStep = _missionData['statut'] ?? 'en_attente';
+      });
+    } catch (e) {
+      // Gérer l'erreur silencieusement
+    }
+  }
+
+  String _getButtonText() {
+    final userRole = Provider.of<UserService>(context, listen: false).userInfo['rôle'];
+    final isAmbulancier = userRole == 'ambulancier';
+    final isDoctorOrNurse = userRole == 'médecin' || userRole == 'medecin' || userRole == 'infirmier';
+
+    String buttonText = '';
+    if (isAmbulancier) {
+      if (_missionData['heure_depart'] == null) {
+        buttonText = 'Départ';
+      } else if (_missionData['heure_arrivee'] == null) {
+        buttonText = 'Arrivée';
+      } else if (_missionData['heure_redepart'] == null) {
+        buttonText = 'Redépart';
+      } else if (_missionData['heure_fin'] == null) {
+        buttonText = 'Fin';
+      }
+    } else if (isDoctorOrNurse) {
+      if (_missionData['heure_depart'] == null) {
+        buttonText = 'Départ';
+      } else if (_missionData['heure_arrivee'] == null) {
+        buttonText = 'Arrivée';
+      } else if (_missionData['heure_fin'] == null) {
+        buttonText = 'Fin';
+      }
+    }
+    return buttonText;
   }
 
   @override
@@ -249,7 +293,6 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
     final isAmbulancier = userRole == 'ambulancier';
     final isDoctorOrNurse = userRole == 'médecin' || userRole == 'medecin' || userRole == 'infirmier';
 
-
     List<StepInfo> steps = [];
     if (isAmbulancier) {
       steps = [
@@ -377,7 +420,6 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
                   ),
                 ),
               );
-            } else {
             }
           },
         ),
@@ -665,56 +707,46 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
   }
 
   Future<void> _handleSaveMaterials() async {
+    print('🔵 MissionTrackingScreen: Début de la sauvegarde des matériaux');
+    print('🔵 MissionTrackingScreen: Nombre de matériaux sélectionnés: ${_selectedMaterialsTemp.length}');
+    
     if (_selectedMaterialsTemp.isEmpty) {
-      final shouldContinue = await showDialog<bool>(
-        context: context,
-        builder: (BuildContext context) => AlertDialog(
-          title: const Text('Aucun matériel sélectionné'),
-          content: const Text('Voulez-vous continuer sans enregistrer de matériel ?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Annuler'),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primaryColor,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Continuer'),
-            ),
-          ],
-        ),
-      );
-
-      if (shouldContinue != true) {
-        return;
-      }
+      print('🔵 MissionTrackingScreen: Aucun matériel sélectionné, continuation directe');
+      await _saveMaterialUsage();
+      return;
     }
+    print('🔵 MissionTrackingScreen: Matériaux à sauvegarder: $_selectedMaterialsTemp');
     await _saveMaterialUsage();
   }
 
   Future<void> _saveMaterialUsage() async {
     try {
+      print('🔵 MissionTrackingScreen: Début de l\'enregistrement des matériaux');
       final userInfo = await UserApi.getUserInfo();
+      print('🔵 MissionTrackingScreen: Rôle utilisateur: ${userInfo['rôle']}');
+      
       if (userInfo['rôle'] != 'ambulancier') {
+        print('🔵 MissionTrackingScreen: Utilisateur n\'est pas ambulancier, arrêt');
         return;
       }
 
       final vehicle = await VehicleApi.getVehicleByUserId(userInfo['id']);
       if (vehicle == null) {
+        print('🔵 MissionTrackingScreen: Aucun véhicule trouvé pour l\'utilisateur');
         return;
       }
+      print('🔵 MissionTrackingScreen: Véhicule trouvé: ${vehicle['id']}');
 
       final ambulanceId = vehicle['id'];
       final token = await _getToken();
 
       if (_selectedMaterialsTemp.isNotEmpty) {
+        print('🔵 MissionTrackingScreen: Mise à jour des quantités de matériaux');
         for (var material in _selectedMaterialsTemp) {
           final currentQuantity = material['quantite'] as int;
           final usedQuantity = material['quantite_utilisee'] as int;
           final newQuantity = currentQuantity - usedQuantity;
+          print('🔵 MissionTrackingScreen: Matériel ${material['item']} - Quantité actuelle: $currentQuantity, Utilisée: $usedQuantity, Nouvelle quantité: $newQuantity');
 
           final updateData = {
             'id': material['id'],
@@ -733,12 +765,17 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
           );
 
           if (updateResponse.statusCode != 200) {
+            print('🔴 MissionTrackingScreen: Erreur lors de la mise à jour du matériel ${material['item']}');
             throw Exception('Échec de la mise à jour de la quantité');
           }
+          print('🔵 MissionTrackingScreen: Matériel ${material['item']} mis à jour avec succès');
         }
 
         final items = _selectedMaterialsTemp.map((m) => m['item'] as String).toList();
         final quantities = _selectedMaterialsTemp.map((m) => m['quantite_utilisee'] as int).toList();
+        print('🔵 MissionTrackingScreen: Enregistrement de l\'utilisation des matériaux');
+        print('🔵 MissionTrackingScreen: Items: $items');
+        print('🔵 MissionTrackingScreen: Quantités: $quantities');
 
         final usageData = {
           'ambulance_id': ambulanceId,
@@ -759,17 +796,23 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
         );
 
         if (usageResponse.statusCode != 200 && usageResponse.statusCode != 201) {
+          print('🔴 MissionTrackingScreen: Erreur lors de l\'enregistrement de l\'utilisation');
           throw Exception('Échec de l\'enregistrement de l\'utilisation');
         }
+        print('🔵 MissionTrackingScreen: Utilisation des matériaux enregistrée avec succès');
 
         await _loadUsedMaterials();
         setState(() {
           _selectedMaterialsTemp.clear();
         });
         await _clearTempMaterialsLocally();
+        print('🔵 MissionTrackingScreen: Données temporaires nettoyées');
+      } else {
+        print('🔵 MissionTrackingScreen: Aucun matériel à enregistrer');
       }
 
       if (mounted) {
+        print('🔵 MissionTrackingScreen: Redirection vers la page d\'accueil');
         Navigator.pushNamedAndRemoveUntil(
           context,
           '/home',
@@ -777,7 +820,7 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
         );
       }
     } catch (e) {
-      // Gérer l'erreur silencieusement
+      print('🔴 MissionTrackingScreen: Erreur lors de la sauvegarde des matériaux: $e');
     }
   }
 
@@ -832,24 +875,24 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
         children: List.generate(
           steps.length * 2 - 1,
           (index) {
-            if (index.isEven) {
-              final stepIndex = index ~/ 2;
+          if (index.isEven) {
+            final stepIndex = index ~/ 2;
               if (stepIndex >= steps.length) {
                 return const SizedBox.shrink();
               }
-              return _buildStepIcon(
-                steps[stepIndex].icon,
-                steps[stepIndex].label,
-                steps[stepIndex].isCompleted,
-                steps[stepIndex].color,
-              );
-            } else {
-              final previousStepIndex = index ~/ 2;
+            return _buildStepIcon(
+              steps[stepIndex].icon,
+              steps[stepIndex].label,
+              steps[stepIndex].isCompleted,
+              steps[stepIndex].color,
+            );
+          } else {
+            final previousStepIndex = index ~/ 2;
               if (previousStepIndex >= steps.length - 1) {
                 return const SizedBox.shrink();
               }
-              return _buildStepConnector(steps[previousStepIndex].isCompleted);
-            }
+            return _buildStepConnector(steps[previousStepIndex].isCompleted);
+          }
           },
         ),
       ),
@@ -919,14 +962,14 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Localisation',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primaryColor,
-                  ),
+          children: [
+            Text(
+              'Localisation',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppColors.primaryColor,
+              ),
                 ),
                 Text(
                   _missionData['heure_arrivee'] != null ? 'Destination' : 'Point de départ',
@@ -940,12 +983,12 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
             ),
             SizedBox(height: 16),
             Container(
-              height: 200,
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(15),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
+      height: 200,
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: Colors.grey[300]!),
+      ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(15),
                 child: FutureBuilder<Map<String, double>?>(
@@ -961,23 +1004,23 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
 
                     if (snapshot.hasError || !snapshot.hasData) {
                       return Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.map_outlined,
-                              size: 48,
-                              color: AppColors.primaryColor,
-                            ),
-                            SizedBox(height: 16),
-                            Text(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.map_outlined,
+              size: 48,
+              color: AppColors.primaryColor,
+            ),
+            SizedBox(height: 16),
+            Text(
                               'Impossible de charger la carte',
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
                           ],
                         ),
                       );
@@ -1010,8 +1053,8 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
                               SizedBox(height: 16),
                               Text(
                                 'Impossible de charger la carte',
-                                style: TextStyle(
-                                  color: Colors.grey[600],
+                  style: TextStyle(
+                    color: Colors.grey[600],
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -1046,36 +1089,22 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
                       currentAddress,
                       style: TextStyle(
                         color: Colors.grey[800],
-                        fontSize: 14,
-                      ),
-                    ),
+                    fontSize: 14,
                   ),
-                ],
+                ),
               ),
+          ],
+      ),
             ),
           ],
+          ),
         ),
-      ),
-    );
-  }
-
-  Future<void> _loadMissionDataFromApi() async {
-    try {
-      final missionData = await MissionApi.getMissionDetails(widget.missionId);
-      if (missionData == null || !mounted) return;
-
-      setState(() {
-        _missionData = missionData;
-        _currentStep = _missionData['statut'] ?? 'en_attente';
-      });
-    } catch (e) {
-      // Gérer l'erreur silencieusement
-    }
+      );
   }
 
   Future<void> _handleNextStep() async {
     try {
-      if (mounted) {
+        if (mounted) {
         setState(() => _isLoading = true);
       }
 
@@ -1196,14 +1225,14 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
                       onTap: () async {
                         Navigator.pop(context);
                         final Uri uri = Uri.parse(app.value);
-                        
+
                         try {
-                          if (await canLaunchUrl(uri)) {
+      if (await canLaunchUrl(uri)) {
                             await launchUrl(
                               uri,
                               mode: LaunchMode.platformDefault,
                             );
-                          } else {
+      } else {
                             if (app.key == 'Google Maps') {
                               final alternativeUri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$encodedDestination&travelmode=driving');
                               if (await canLaunchUrl(alternativeUri)) {
@@ -1218,9 +1247,9 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
                                   backgroundColor: Colors.red,
                                 ),
                               );
-                            }
-                          }
-                        } catch (e) {
+        }
+      }
+    } catch (e) {
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
@@ -1265,36 +1294,36 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
       updatedData[timeField] = formattedTime;
 
       // Calculer les temps pour chaque étape
-      switch (timeField) {
-        case 'heure_depart':
-          if (_missionData['heure_affectation'] != null) {
+        switch (timeField) {
+          case 'heure_depart':
+            if (_missionData['heure_affectation'] != null) {
             final affectationTime = DateTime.parse(_missionData['heure_affectation']);
-            final difference = now.difference(affectationTime);
+              final difference = now.difference(affectationTime);
             updatedData['temps_depart'] = _formatDuration(difference);
             updatedData['temps_attente'] = _formatDuration(difference);
-          }
-          break;
-        case 'heure_arrivee':
-          if (_missionData['heure_depart'] != null) {
-            final departTime = DateTime.parse(_missionData['heure_depart']);
-            final difference = now.difference(departTime);
+            }
+            break;
+          case 'heure_arrivee':
+            if (_missionData['heure_depart'] != null) {
+              final departTime = DateTime.parse(_missionData['heure_depart']);
+              final difference = now.difference(departTime);
             updatedData['temps_arrivee'] = _formatDuration(difference);
             updatedData['temps_trajet'] = _formatDuration(difference);
-          }
-          break;
-        case 'heure_redepart':
-          if (_missionData['heure_arrivee'] != null) {
-            final arriveeTime = DateTime.parse(_missionData['heure_arrivee']);
-            final difference = now.difference(arriveeTime);
+            }
+            break;
+          case 'heure_redepart':
+            if (_missionData['heure_arrivee'] != null) {
+              final arriveeTime = DateTime.parse(_missionData['heure_arrivee']);
+              final difference = now.difference(arriveeTime);
             updatedData['temps_redepart'] = _formatDuration(difference);
             updatedData['temps_intervention'] = _formatDuration(difference);
-          }
-          break;
-        case 'heure_fin':
+            }
+            break;
+          case 'heure_fin':
           // Calculer le temps de fin
-          if (_missionData['heure_redepart'] != null) {
+            if (_missionData['heure_redepart'] != null) {
             final redepartTime = DateTime.parse(_missionData['heure_redepart']);
-            final difference = now.difference(redepartTime);
+              final difference = now.difference(redepartTime);
             updatedData['temps_fin'] = _formatDuration(difference);
             updatedData['temps_retour'] = _formatDuration(difference);
           } else if (_missionData['heure_arrivee'] != null) {
@@ -1305,14 +1334,14 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
           }
 
           // Calculer le temps total de la mission
-          if (_missionData['heure_affectation'] != null) {
-            final debutMission = DateTime.parse(_missionData['heure_affectation']);
-            final difference = now.difference(debutMission);
-            updatedData['temps_total'] = _formatDuration(difference);
+              if (_missionData['heure_affectation'] != null) {
+              final debutMission = DateTime.parse(_missionData['heure_affectation']);
+                final difference = now.difference(debutMission);
+              updatedData['temps_total'] = _formatDuration(difference);
             updatedData['temps_total_intervention'] = _formatDuration(difference);
-          }
-          break;
-      }
+            }
+            break;
+        }
 
       updatedData['statut'] = timeField == 'heure_fin' ? 'terminée' : 'en cours';
 
@@ -1337,11 +1366,11 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
         final vehicle = await VehicleApi.getVehicleByUserId(
           (await UserApi.getUserInfo())['id'],
         );
-        if (vehicle != null) {
-          await VehicleApi.updateVehicleStatus(vehicle['id'], 'disponible');
-        }
+          if (vehicle != null) {
+            await VehicleApi.updateVehicleStatus(vehicle['id'], 'disponible');
+          }
         await _showMaterialDialog();
-      }
+        }
     } catch (e) {
       // Gérer l'erreur silencieusement
     }
@@ -1407,9 +1436,9 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
             .map((material) => Map<String, dynamic>.from(material))
             .toList();
 
-        setState(() {
-          _availableMaterials = filteredMaterials;
-        });
+          setState(() {
+            _availableMaterials = filteredMaterials;
+          });
       }
     } catch (e) {
       // Gérer l'erreur silencieusement
@@ -1429,184 +1458,16 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
       );
 
       if (response.statusCode == 200 || response.statusCode == 201) {
-        if (mounted) {
-          setState(() {
+      if (mounted) {
+        setState(() {
             _missionData['statut'] = 'terminée';
-          });
-        }
+                });
+              }
       }
     } catch (e) {
       // Gérer l'erreur silencieusement
     }
   }
-
-  String _getButtonText() {
-    final userRole = Provider.of<UserService>(context, listen: false).userInfo['rôle'];
-    final isAmbulancier = userRole == 'ambulancier';
-    final isDoctorOrNurse = userRole == 'médecin' || userRole == 'medecin' || userRole == 'infirmier';
-
-    if (isAmbulancier) {
-      if (_missionData['heure_depart'] == null) {
-        return 'Départ';
-      }
-      if (_missionData['heure_arrivee'] == null) {
-        return 'Arrivée';
-      }
-      if (_missionData['heure_redepart'] == null) {
-        return 'Redépart';
-      }
-      if (_missionData['heure_fin'] == null) {
-        return 'Fin';
-      }
-    } else if (isDoctorOrNurse) {
-      if (_missionData['heure_depart'] == null) {
-        return 'Départ';
-      }
-      if (_missionData['heure_arrivee'] == null) {
-        return 'Arrivée';
-      }
-      if (_missionData['heure_fin'] == null) {
-        return 'Fin';
-      }
-    }
-    return '';
-  }
-
-  Future<void> _showMaterialDialog() async {
-    final List<Map<String, dynamic>> tempMaterials = List.from(_selectedMaterialsTemp);
-
-    await showDialog(
-        context: context,
-      barrierDismissible: false,
-      builder: (BuildContext dialogContext) => Dialog(
-        child: Container(
-              width: double.maxFinite,
-              constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.8,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                      'Matériaux utilisés',
-                          style: TextStyle(
-                        fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                        color: AppColors.primaryColor,
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(dialogContext),
-                            ),
-                          ],
-                        ),
-              ),
-                            Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (tempMaterials.isEmpty)
-                        const Text('Aucun matériau sélectionné')
-                      else
-                        ...tempMaterials.asMap().entries.map((entry) {
-                          final index = entry.key;
-                          final material = entry.value;
-                                return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.grey[50],
-                                    borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey[200]!),
-                            ),
-                            child: ListTile(
-                              leading: Icon(
-                                Icons.medical_services,
-                                          color: AppColors.primaryColor,
-                                        ),
-                              title: Text(
-                                material['item'] ?? '',
-                                            style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              subtitle: Text('Quantité: ${material['quantite_utilisee']}'),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete, color: Colors.red),
-                                onPressed: () {
-    setState(() {
-                                    tempMaterials.removeAt(index);
-                                  });
-                                },
-                                    ),
-                                  ),
-                                );
-                        }).toList(),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: () {
-                          Navigator.pop(dialogContext);
-                          _showMaterialSelectionDialog();
-                        },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.primaryColor,
-                                foregroundColor: Colors.white,
-                                ),
-                        child: const Text('Ajouter un matériau'),
-                          ),
-                      ],
-                    ),
-                  ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-              TextButton(
-                      onPressed: () => Navigator.pop(dialogContext),
-                      child: const Text('Annuler'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      onPressed: () async {
-                        if (tempMaterials.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Veuillez sélectionner au moins un matériel'),
-                              backgroundColor: Colors.orange,
-                            ),
-                          );
-        return;
-      }
-        setState(() {
-                          _selectedMaterialsTemp = List.from(tempMaterials);
-                        });
-                        Navigator.pop(dialogContext);
-                        await _saveMaterialUsage();
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primaryColor,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text('Enregistrer'),
-                    ),
-                  ],
-                                          ),
-                                        ),
-                                      ],
-          ),
-          ),
-        ),
-      );
-    }
 
   Widget _buildDestinationCard() {
     return Card(
@@ -1637,37 +1498,108 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
                     final TextEditingController addressController = TextEditingController(
                       text: _missionData['adresse_destination'] ?? '',
                     );
+                    Timer? _debounce;
+                    List<String> suggestions = [];
+                    bool isLoading = false;
                     
                     final result = await showDialog<String>(
                       context: context,
-                      builder: (BuildContext context) => AlertDialog(
-                        title: const Text('Modifier l\'adresse de destination'),
-                        content: TextField(
-                          controller: addressController,
-                          decoration: const InputDecoration(
-                            hintText: 'Entrez la nouvelle adresse de destination',
-                            border: OutlineInputBorder(),
-                          ),
-                          maxLines: 3,
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('Annuler'),
-                          ),
-                          ElevatedButton(
-                            onPressed: () {
-                              if (addressController.text.isNotEmpty) {
-                                Navigator.pop(context, addressController.text);
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.primaryColor,
-                              foregroundColor: Colors.white,
+                      builder: (BuildContext context) => StatefulBuilder(
+                        builder: (context, setState) => AlertDialog(
+                          title: const Text('Modifier l\'adresse de destination'),
+                          content: SizedBox(
+                            width: double.maxFinite,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                TextField(
+                                  controller: addressController,
+                                  decoration: InputDecoration(
+                                    hintText: 'Entrez la nouvelle adresse de destination',
+                                    border: OutlineInputBorder(),
+                                    suffixIcon: isLoading 
+                                      ? SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor: AlwaysStoppedAnimation<Color>(AppColors.primaryColor),
+                                          ),
+                                        )
+                                      : null,
+                                  ),
+                                  maxLines: 3,
+                                  onChanged: (value) async {
+                                    if (_debounce?.isActive ?? false) _debounce!.cancel();
+                                    _debounce = Timer(const Duration(milliseconds: 500), () async {
+                                      if (value.length > 2) {
+                                        setState(() => isLoading = true);
+                                        try {
+                                          suggestions = await MissionTrackingMethods.getAddressSuggestions(
+                                            value,
+                                            'AIzaSyBmnUN64iSMgThm_AwB4iYs-rYlQSX6jDw'
+                                          );
+                                          setState(() {});
+                                        } catch (e) {
+                                          print('🔴 Erreur lors de la recherche d\'adresses: $e');
+                                        } finally {
+                                          setState(() => isLoading = false);
+                                        }
+                                      } else {
+                                        setState(() => suggestions = []);
+                                      }
+                                    });
+                                  },
+                                ),
+                                if (suggestions.isNotEmpty) ...[
+                                  const SizedBox(height: 8),
+                                  Container(
+                                    constraints: BoxConstraints(
+                                      maxHeight: 200,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[50],
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.grey[300]!),
+                                    ),
+                                    child: ListView.builder(
+                                      shrinkWrap: true,
+                                      itemCount: suggestions.length,
+                                      itemBuilder: (context, index) {
+                                        return ListTile(
+                                          title: Text(suggestions[index]),
+                                          onTap: () {
+                                            addressController.text = suggestions[index];
+                                            setState(() => suggestions = []);
+                                          },
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
-                            child: const Text('Enregistrer'),
                           ),
-                        ],
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('Annuler'),
+                            ),
+                            ElevatedButton(
+                              onPressed: () {
+                                if (addressController.text.isNotEmpty) {
+                                  Navigator.pop(context, addressController.text);
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.primaryColor,
+                                foregroundColor: Colors.white,
+                              ),
+                              child: const Text('Enregistrer'),
+                            ),
+                          ],
+                        ),
                       ),
                     );
 
@@ -1689,20 +1621,9 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
                           setState(() {
                             _missionData = updatedData;
                           });
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Adresse de destination mise à jour'),
-                              backgroundColor: Colors.green,
-                            ),
-                          );
                         }
                       } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Erreur lors de la mise à jour de l\'adresse'),
-                            backgroundColor: Colors.red,
-                          ),
-                        );
+                        print('🔴 Erreur lors de la mise à jour de l\'adresse: $e');
                       }
                     }
                   },
@@ -1781,6 +1702,115 @@ class _MissionTrackingScreenState extends State<MissionTrackingScreen>
     final key = 'selected_materials_temp_${widget.missionId}';
     await prefs.remove(key);
   }
+
+  Future<void> _showMaterialDialog() async {
+    print('🔵 MissionTrackingScreen: Affichage du dialogue de matériaux');
+    final List<Map<String, dynamic>> tempMaterials = List.from(_selectedMaterialsTemp);
+    print('🔵 MissionTrackingScreen: Matériaux temporaires: $tempMaterials');
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => Dialog(
+        child: Container(
+          width: double.maxFinite,
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.8,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Matériaux utilisés',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.primaryColor,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        print('🔵 MissionTrackingScreen: Fermeture du dialogue de matériaux');
+                        Navigator.pop(dialogContext);
+                        _saveMaterialUsage();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (tempMaterials.isEmpty)
+                        const Text('Aucun matériau sélectionné')
+                      else
+                        ...tempMaterials.asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final material = entry.value;
+                          print('🔵 MissionTrackingScreen: Affichage du matériel: ${material['item']}');
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.grey[50],
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.grey[200]!),
+                            ),
+                            child: ListTile(
+                              leading: Icon(
+                                Icons.medical_services,
+                                color: AppColors.primaryColor,
+                              ),
+                              title: Text(
+                                material['item'] ?? '',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              subtitle: Text('Quantité: ${material['quantite_utilisee']}'),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () {
+                                  print('🔵 MissionTrackingScreen: Suppression du matériel: ${material['item']}');
+                                  setState(() {
+                                    tempMaterials.removeAt(index);
+                                  });
+                                },
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: () {
+                          print('🔵 MissionTrackingScreen: Ouverture du dialogue de sélection de matériaux');
+                          Navigator.pop(dialogContext);
+                          _showMaterialSelectionDialog();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primaryColor,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Ajouter un matériau'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class StepInfo {
@@ -1790,4 +1820,144 @@ class StepInfo {
   final Color color;
 
   StepInfo(this.icon, this.label, this.isCompleted, this.color);
+}
+
+class _AddressAutocompleteField extends StatefulWidget {
+  final TextEditingController controller;
+  final Function(String) onAddressSelected;
+
+  const _AddressAutocompleteField({
+    required this.controller,
+    required this.onAddressSelected,
+  });
+
+  @override
+  State<_AddressAutocompleteField> createState() => _AddressAutocompleteFieldState();
+}
+
+class _AddressAutocompleteFieldState extends State<_AddressAutocompleteField> {
+  List<String> _suggestions = [];
+  bool _isLoading = false;
+  Timer? _debounce;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _getSuggestions(String query) async {
+    if (query.length < 3) {
+      setState(() {
+        _suggestions = [];
+        _isLoading = false;
+      });
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final suggestions = await MissionTrackingMethods.getAddressSuggestions(
+        query,
+        'AIzaSyBmnUN64iSMgThm_AwB4iYs-rYlQSX6jDw'
+      );
+      
+      if (mounted) {
+        setState(() {
+          _suggestions = suggestions;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('🔴 Erreur lors de la recherche d\'adresses: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        TextField(
+          controller: widget.controller,
+          decoration: InputDecoration(
+            hintText: 'Entrez la nouvelle adresse de destination',
+            border: OutlineInputBorder(),
+            suffixIcon: _isLoading 
+              ? SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(AppColors.primaryColor),
+                  ),
+                )
+              : null,
+          ),
+          maxLines: 3,
+          onChanged: (value) {
+            if (_debounce?.isActive ?? false) _debounce!.cancel();
+            _debounce = Timer(const Duration(milliseconds: 500), () async {
+              if (value.length > 2) {
+                setState(() => _isLoading = true);
+                try {
+                  _suggestions = await MissionTrackingMethods.getAddressSuggestions(
+                    value,
+                    'AIzaSyBmnUN64iSMgThm_AwB4iYs-rYlQSX6jDw'
+                  );
+                  if (_suggestions.isNotEmpty) {
+                    final selectedAddress = await showDialog<String>(
+                      context: context,
+                      builder: (context) => SimpleDialog(
+                        title: const Text('Sélectionnez une adresse'),
+                        children: _suggestions.map((address) => SimpleDialogOption(
+                          onPressed: () => Navigator.pop(context, address),
+                          child: Text(address),
+                        )).toList(),
+                      ),
+                    );
+                    
+                    if (selectedAddress != null) {
+                      widget.controller.text = selectedAddress;
+                    }
+                  }
+                } catch (e) {
+                  print('🔴 Erreur lors de la recherche d\'adresses: $e');
+                } finally {
+                  setState(() => _isLoading = false);
+                }
+              }
+            });
+          },
+        ),
+        if (_suggestions.isNotEmpty)
+          Container(
+            margin: EdgeInsets.only(top: 8),
+            decoration: BoxDecoration(
+              color: Colors.grey[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.grey[300]!),
+            ),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: _suggestions.length,
+              itemBuilder: (context, index) {
+                return ListTile(
+                  title: Text(_suggestions[index]),
+                  onTap: () {
+                    widget.controller.text = _suggestions[index];
+                    widget.onAddressSelected(_suggestions[index]);
+                    setState(() => _suggestions = []);
+                  },
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
 }

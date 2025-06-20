@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:regulation_assiste/api/chat_api.dart';
+import 'package:transport_sante/api/chat_api.dart';
 import '../styles/card_styles.dart';
 import '../styles/colors.dart';
 import '../styles/app_text_styles.dart';

@@ -115,34 +115,26 @@ class ChatApi {
     required String missionId,
     String? imageUrl,
   }) async {
-    print('🔵 ===== DÉBUT ENVOI MESSAGE =====');
-    print('🔵 Expéditeur: $sender');
-    print('🔵 Message: $message');
-    print('🔵 ID Utilisateur: $userId');
-    print('🔵 ID Mission: $missionId');
-    
     try {
       final token = await ApiService.getToken();
-      print('🔵 Token obtenu: ${token != null ? 'Oui' : 'Non'}');
 
       if (token == null) {
-        print('❌ Token manquant');
-        throw Exception('Vous devez être connecté pour envoyer des messages');
+        final newToken = await ApiService.refreshToken();
+        if (newToken == null) {
+          throw Exception('Impossible d\'obtenir un token valide');
+        }
       }
 
       if (socket == null || !socket!.connected) {
-        print('🔵 Socket non connecté, initialisation...');
         initializeSocket();
         await Future.delayed(Duration(seconds: 2));
-        print('✅ Socket initialisé');
       }
 
-      print('🔵 Envoi du message...');
-      final messageResponse = await http.post(
+      final response = await http.post(
         Uri.parse('$baseUrl/messages'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
+          'Authorization': 'Bearer ${await ApiService.getToken()}',
         },
         body: json.encode({
           'sender': sender,
@@ -153,50 +145,22 @@ class ChatApi {
         }),
       );
 
-      print('🔵 Réponse du serveur:');
-      print('   - Status: ${messageResponse.statusCode}');
-      print('   - Body: ${messageResponse.body}');
-
-      if (messageResponse.statusCode == 200) {
-        print('✅ Message envoyé avec succès');
-      } else {
-        final errorData = json.decode(messageResponse.body);
-        throw Exception(errorData['message'] ?? 'Erreur lors de l\'envoi du message');
+      if (response.statusCode != 200) {
+        throw Exception('Erreur lors de l\'envoi du message');
       }
     } catch (e) {
-      print('❌ Erreur: $e');
       throw Exception('Erreur lors de l\'envoi du message: $e');
-    } finally {
-      print('🔵 ===== FIN ENVOI MESSAGE =====');
     }
   }
 
   // Récupérer l'historique des messages d'une mission
   static Future<List<dynamic>> getMessageHistory(String missionId) async {
-    print('🔵 ===== DÉBUT RÉCUPÉRATION HISTORIQUE =====');
     try {
       final token = await ApiService.getToken();
       if (token == null) {
-        print('❌ Token manquant');
         return [];
       }
 
-      // Vérification des autorisations
-      print('🔵 Vérification des autorisations...');
-      final missionResponse = await http.get(
-        Uri.parse('$baseUrl/missions/$missionId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      if (missionResponse.statusCode != 200) {
-        print('❌ Accès à la mission refusé');
-        return [];
-      }
-
-      // Récupération des messages
-      print('🔵 Récupération des messages...');
       final response = await http.get(
         Uri.parse('$baseUrl/messages/mission/$missionId'),
         headers: {
@@ -206,17 +170,16 @@ class ChatApi {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        print('✅ ${data.length} messages récupérés');
         return data;
-      } else {
-        print('❌ Erreur lors de la récupération des messages');
-        return [];
+      } else if (response.statusCode == 401) {
+        final newToken = await ApiService.refreshToken();
+        if (newToken != null) {
+          return getMessageHistory(missionId);
+        }
       }
-    } catch (e) {
-      print('❌ Erreur: $e');
       return [];
-    } finally {
-      print('🔵 ===== FIN RÉCUPÉRATION HISTORIQUE =====');
+    } catch (e) {
+      return [];
     }
   }
 

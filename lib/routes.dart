@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:regulation_assiste/screens/load_screen.dart';
-import 'package:regulation_assiste/screens/login_screen.dart';
+import 'package:transport_sante/screens/load_screen.dart';
+import 'package:transport_sante/screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/interventions_screen.dart';
 import 'screens/reports_screen.dart';

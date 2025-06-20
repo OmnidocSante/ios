@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart'; // For picking images or camera usage
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import 'package:regulation_assiste/widgets/home/chat_widgets.dart';
+import 'package:transport_sante/widgets/home/chat_widgets.dart';
 import '../styles/colors.dart';
 import '../styles/text_styles.dart' as old_styles;
 import '../styles/bottom_navigation_bar_styles.dart';
@@ -146,17 +146,30 @@ class _ChatScreenState extends State<ChatScreen>
 
   void _handleNewMessage(dynamic data) {
     if (data['mission_id'].toString() == widget.missionId) {
-      setState(() {
-        messages.insert(0, {
-          'sender': data['sender'] ?? 'Inconnu',
-          'time': DateTime.now().toString().substring(11, 16),
-          'message': data['message'] ?? '',
-          'image': data['image_url'] ?? '',
-          'isCurrentUser': data['sender_id'] == currentUserId,
-          'sender_id': data['sender_id'],
-        });
+      // Récupérer les informations de l'expéditeur
+      ChatApi.getUserInfo(data['sender_id'].toString()).then((userInfo) {
+        String senderName;
+        if (userInfo != null) {
+          final nom = userInfo['nom'] ?? '';
+          final prenom = userInfo['prenom'] ?? '';
+          senderName = '$prenom $nom';
+        } else {
+          senderName = data['sender'] ?? 'Utilisateur inconnu';
+        }
+
+        if (mounted) {
+          setState(() {
+            messages.insert(0, {
+              'sender': senderName,
+              'time': DateTime.now().toString().substring(11, 16),
+              'message': data['message'] ?? '',
+              'image': data['image_url'] ?? '',
+              'isCurrentUser': data['sender_id'] == currentUserId,
+            });
+          });
+          _scrollToBottom();
+        }
       });
-      _scrollToBottom();
     }
   }
 
@@ -173,14 +186,24 @@ class _ChatScreenState extends State<ChatScreen>
         final processedMessages = await Future.wait(
           history.reversed.map((msg) async {
             final senderId = msg['sender_id'].toString();
-            final senderName = await ChatMethods.getUserName(senderId, currentUserName!);
+            // Récupérer les informations complètes de l'utilisateur
+            final userInfo = await ChatApi.getUserInfo(senderId);
+            String senderName;
+            
+            if (userInfo != null) {
+              final nom = userInfo['nom'] ?? '';
+              final prenom = userInfo['prenom'] ?? '';
+              senderName = '$prenom $nom';
+            } else {
+              senderName = 'Utilisateur inconnu';
+            }
+
             return {
               'sender': senderName,
               'time': ChatMethods.formatMessageTime(msg['timestamp']),
               'message': msg['message'] ?? '',
               'image': msg['image_url'] ?? '',
               'isCurrentUser': senderId == currentUserId,
-              'sender_id': senderId,
             };
           }),
         );
@@ -220,40 +243,21 @@ class _ChatScreenState extends State<ChatScreen>
     }
 
     try {
+      final messageContent = _messageController.text.trim();
+      final userInfo = await UserApi.getUserInfo();
+      final nom = userInfo['nom'] ?? '';
+      final prenom = userInfo['prenom'] ?? '';
+      final fullName = '$prenom $nom';
+
       await ChatApi.sendMessage(
-        sender: currentUserName!,
-        message: _messageController.text,
+        sender: fullName,
+        message: messageContent,
         userId: currentUserId!,
         missionId: widget.missionId,
       );
       _messageController.clear();
     } catch (e) {
-      if (mounted) {
-        String errorMessage = 'Erreur lors de l\'envoi du message';
-        
-        if (e.toString().contains('infirmier')) {
-          errorMessage = 'Les infirmiers n\'ont pas la permission d\'envoyer des messages dans cette mission';
-        } else if (e.toString().contains('accès')) {
-          errorMessage = 'Vous n\'avez pas accès à cette mission';
-        } else if (e.toString().contains('informations de l\'utilisateur')) {
-          errorMessage = 'Impossible de récupérer vos informations. Veuillez réessayer.';
-        }
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: Colors.red,
-            duration: Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'OK',
-              textColor: Colors.white,
-              onPressed: () {
-                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-              },
-            ),
-          ),
-        );
-      }
+      // Gérer l'erreur silencieusement
     }
   }
 

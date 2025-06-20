@@ -92,15 +92,15 @@ class _PatientInfoScreenState extends State<PatientInfoScreen>
         setState(() {
           currentUserRole = userInfo['rôle']?.toString().toLowerCase();
         });
-
-        await Future.wait([
-          _loadData(),
-          _initializeChat(),
+      
+      await Future.wait([
+        _loadData(),
+        _initializeChat(),
         ], eagerError: true);
 
         if (mounted) {
           setState(() {
-            _isInitialized = true;
+      _isInitialized = true;
           });
         }
       } catch (e) {

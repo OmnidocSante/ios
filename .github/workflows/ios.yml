@@ -37,7 +37,11 @@ jobs:
           
       - name: Build iOS
         run: |
-          flutter build ipa --release
+          flutter build ipa --release --target-platform=ios-arm64
+          env:
+            XCODE_VERSION: '16.0'
+            IPHONEOS_DEPLOYMENT_TARGET: '14.5'
+            SDKROOT: 'iphoneos18.0'
           
       - name: Upload to App Store
         uses: apple-actions/upload-testflight@v1
